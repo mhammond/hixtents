@@ -1,0 +1,203 @@
+<html>
+    <head>
+    <link rel="stylesheet" type="text/css" href="picker.css" />
+    <script src="http://code.jquery.com/jquery.min.js" type="text/javascript"></script>
+    <script src="http://ajax.microsoft.com/ajax/jquery.templates/beta1/jquery.tmpl.min.js"></script>
+    <script src="/jschannel.js"></script>
+    <script>
+
+console = {
+   log: function() {
+      var args = Array.prototype.slice.call(arguments);
+      dump(args.join(" ") + "\n");
+   }
+}
+
+// We assume no reuse of the picker window - so this window is handling exactly 1 intent.
+// XXX - which will turn out to be wrong - what if the same client window invokes 
+// multiple intents?  Later...
+var intentData = null;
+var intentClientWindow = null;
+
+// All 'services' keyed by the id of the iframe (ie, by the href of the
+// tab itself, minus the '#')
+var servicesById;
+var clientChannel; // a fixed jschannel back to our opener, intents.js
+var currentHandlerChannel; // may change as handlers are selected.
+
+function defaultErrorHandler(err, msg) {
+  dump("channel error: " + err + "/" + msg + "\n");
+}
+
+
+window.onload = function(evt) {
+  clientChannel = Channel.build({window: window.opener,
+                                origin: "*",
+                                scope: "intents_client_channel",
+                                onReady: function() {
+                                  console.log("channel to client is ready")
+                                }
+  });
+  // invoked as part of the initializing dance.
+  clientChannel.bind("intentHandle", function(trans, data) {
+    try {
+      if (intentData) {
+        throw "already have the intent data!";
+      }
+      intentData = data;
+      intentClientWindow = window.opener;
+      document.getElementById("intent").textContent = data.intent;
+      document.getElementById("contentType").textContent = data.contentType || "*/*";
+      setupUI(getServices(data));
+    } catch (ex) {
+      dump("EEEKx: " + ex.toString() + "\n");
+    }
+  });
+
+  // invoked when the client does a port.postMessage to the intent handler.
+  // We just echo it to our handler channel.
+  clientChannel.bind("intentRequest", function(trans, data) {
+    currentHandlerChannel.call({method: "intentRequest",
+                                params: data,
+                                success: function() {},
+                                error: defaultErrorHandler
+    });
+  });
+}
+
+function wireUpIntent(service, iframe) {
+  // This function "wires up" a channel between the client and the selected
+  // handler.  After notifying intents.js of this via our jschannel,
+  // intents.js will arrange for the client callback to be called.
+  function beginIntent() {
+    currentHandlerChannel.call({method: "intentInitialize",
+                                params: {},
+                                success: function() {},
+                                error: defaultErrorHandler
+    })
+    clientChannel.call({method: "intentBegin",
+                        params: {},
+                        success: function() {
+                        },
+                        error: defaultErrorHandler
+    });
+  };
+  if (service._channel) {
+    currentHandlerChannel = service._channel;
+    beginIntent();
+  } else {
+    service._channel = currentHandlerChannel = Channel.build({
+      window: iframe.contentWindow,
+      origin: '*',
+      scope: "intents_handler_channel",
+      onReady: function() {
+        currentHandlerChannel.bind("intentResponse", function(trans, data) {
+          // When the intent handler does a postMessage on its port, it winds up here.
+          // We just echo the message to the client window.
+          clientChannel.call({method: "intentResponse",
+                              params: data,
+                              success: function() {},
+                              error: defaultErrorHandler
+          });
+        });
+        // now tell the client everything is bound and ready to go.
+        beginIntent();
+      }
+    });
+  }
+}
+
+function getServices(intentData) {
+  // this relies on being hosted on the same origin as our intents.js
+  var handlers = JSON.parse(localStorage.intentHandlers || "{}");
+  // XXX - obviously our contentType matching needs work :)  For now it must match exactly.
+  var filter = intentData.contentType || '*/*';
+  var registered = [];
+  if (handlers[intentData.intent] && handlers[intentData.intent][filter]) {
+    registered = handlers[intentData.intent][filter];
+  }
+  var result = [];
+  for (var url in registered) {
+    var svc = registered[url];
+    result.push(svc);
+  }
+  console.log("have", result.length, "services for", intentData.intent, "(" + filter + ")");
+  return result;
+}
+
+function activateTab(tab) {
+  $("ul.tabs li").removeClass("active"); //Remove any "active" class
+  tab.addClass("active"); //Add "active" class to selected tab
+  $(".tab_content").hide(); //Hide all tab content
+
+  var activeTab = tab.find("a").attr("href"); //Find the href attribute value to identify the active tab + content
+  var frameId = activeTab.substr(1);
+  var service = servicesById[frameId];
+  if ($(activeTab).length == 0) {
+    console.log("creating new iframe for", activeTab);
+    // no iframe created yet - do that now.
+    var iframe = document.createElement("iframe");
+    iframe.id = frameId;
+    iframe.src = service.url;
+    iframe.height = "400";
+    iframe.width = "90%";
+    iframe.classList.add("serviceFrame");
+    iframe.classList.add("tab_content");
+    $("#service-tabs-container").append(iframe);
+  }
+  wireUpIntent(service, $('#' + frameId)[0]);
+  $(activeTab).fadeIn(); //Fade in the active ID content
+  return false;
+}
+
+function setupUI(services) {
+  // first we create tabs for each of the services - the actual iframes are
+  // created on demand (mainly for privacy - so services don't get to see the
+  // share data until they are explicitly selected)
+  console.log("setupUI for", services.length, "services");
+  servicesById = {};
+  for (var i = 0; i < services.length; i++) {
+    servicesById["svc-tab-" + i] = services[i];
+  }
+  $("#serviceTabs").tmpl({
+    'services': services
+  }).appendTo("#service-tabs-container");
+  // hook up the clicks to select a tab.
+  $("ul.tabs li").click(function() {
+    return activateTab($(this));
+  });
+  // and "select" the first tab.
+  activateTab($("ul.tabs li").first());
+}
+
+</script>
+
+    <script id="serviceTabs" type="text/x-jquery-tmpl">
+      <ul id="services-tabs" class="tabs">
+        {{each( i, svc ) services}}
+        <li class="serviceTab" data-for="svc-tab-${i}">
+          <a href="#svc-tab-${i}" index="${i}">
+            <img src="${svc.icon}" class="serviceIcon"/> 
+            <div class="serviceTitle">${svc.title}</div>
+          </a>
+        </li>
+        {{/each}}
+        </ul>
+    </script>
+
+    </head>
+<body>
+    <p>
+    I'm an intent picker window - I've been created with an intent 
+    <tt><span id="intent">???</span></tt>
+    and a content-type of <tt><span id="contentType">???</span></tt>
+    </p>
+
+    <div id="services">
+      <div id="service-tabs-container">
+      </div>
+      <div id = "service-frames-container">
+      </div>
+    </div>
+</body>
+</html>

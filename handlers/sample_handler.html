@@ -1,0 +1,25 @@
+<html>
+    <head>
+    <title>A test handler</title>
+    <link rel="icon" href="sample_handler.png"/>
+    
+    <script src="http://localhost:8888/intents.js"></script>
+    <script>
+dump("handler loaded\n");
+window.addEventListener("load", function() {
+    console.log("doc loaded - adding intent handler");
+    navigator.registerIntentHandler('share', '*/*', location.href, 'inline');
+}, false);
+
+window.onintent = function(evt) {
+    console.log("handler onintent invoked");;
+    document.getElementById("status").textContent = "I got the intent data: " + JSON.stringify(evt.data);
+    evt.ports[0].postMessage({result: "it's all good!"});
+}
+    </script>
+    </head>
+    <body>
+        Hey - I'm an intent handler and
+        <span id="status">I'm waiting for intent data</span>
+    </body>
+</html>
