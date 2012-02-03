@@ -3,24 +3,6 @@
     <script src="http://localhost:8888/intents.js"></script>
     <script>
 
-/***
-var worker = new Worker('my_task.js');  
-worker.onmessage = function(event) {  
- console.log("Called back by the worker!\n");
- console.log("Navigator is " + navigator);
- console.log(event.data);
- console.log(event.target.port);
- for (var x in event) {
-    try {
-        console.log(x + ": " + event[x]);
-    } catch (ex) {
-        console.log(x + " failed: " + ex);
-    }
- }
-};
-worker.postMessage("hello");
-console.log("created task")
-****/
 function doit() {
     navigator.handleIntent("test", null, function(port) {
         console.log("handleIntent callback called!");
@@ -30,6 +12,7 @@ function doit() {
         port.postMessage("here is the test data");
     });
 };
+
 function shareit() {
     navigator.handleIntent("share", null, function(port) {
         console.log("share handleIntent callback called!");
@@ -44,6 +27,5 @@ function shareit() {
   <body>
      <a href="#" onclick="testit();">Click to invoke 'test' intent...</a>
      <a href="#" onclick="shareit();">Click to invoke 'share' intent...</a>
-
   </body>
 </html>
